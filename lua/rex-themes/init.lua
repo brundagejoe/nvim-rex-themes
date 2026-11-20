@@ -10,8 +10,9 @@ function M.current_id()
   if not vim.env.REX_SESSION or vim.fn.executable("defaults") == 0 then
     return nil
   end
+  assert(vim.system, "rex-themes needs Neovim 0.10 or newer")
   local key = vim.o.background == "light" and "Workspace.lightThemeID" or "Workspace.darkThemeID"
-  local result = vim.system({ "defaults", "read", "com.superlogical.rex", key }, { text = true }):wait()
+  local result = vim.system({ "defaults", "read", "com.superlogical.rex", key }, { text = true }):wait(500)
   if result.code ~= 0 then
     return nil
   end
@@ -21,8 +22,11 @@ function M.current_id()
   end
 end
 
+-- The ID refresh() just read, so load() does not run `defaults read` again.
+local pending
+
 function M.load()
-  local id = M.current_id()
+  local id = pending or M.current_id()
   if not id then
     return false
   end
@@ -49,13 +53,18 @@ local fallback
 
 local function refresh(force)
   local id = M.current_id()
-  if not force and id == M.active and (id == nil or vim.g.colors_name == "rex") then
+  if not force and id == M.active then
     return
   end
+  M.active = id
   if id then
-    vim.cmd.colorscheme("rex")
+    pending = id
+    local ok, err = pcall(vim.cmd.colorscheme, "rex")
+    pending = nil
+    if not ok then
+      error(err, 0)
+    end
   else
-    M.active = nil
     if fallback then
       fallback()
     end
@@ -73,12 +82,14 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd("OptionSet", {
     group = group,
     pattern = "background",
+    nested = true,
     callback = function()
       refresh(true)
     end,
   })
   vim.api.nvim_create_autocmd("FocusGained", {
     group = group,
+    nested = true,
     callback = function()
       refresh(false)
     end,
